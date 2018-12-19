@@ -1,0 +1,44 @@
+from ZenPacks.zenoss.DynamicView import TAG_IMPACTS
+from ZenPacks.zenoss.DynamicView.interfaces import IRelatable
+
+
+def impacted_serviceprofile(obj):
+    """Return name of service profile impacted by obj.
+    Only returns if obj impacts a single service profile. This means that
+    things like servers can be returned, but not a chassis which would impact
+    multiple service profiles.
+    """
+    results = impacted_serviceprofiles_dfs(IRelatable(obj))
+    first = next(results, None)
+    second = next(results, None)
+    return "multiple" if second else getattr(first, "name", "").replace("Service Profile ", "")
+
+
+def impacted_serviceprofiles_dfs(start):
+    """Depth first search for service profiles impacted by "start" object."""
+    # Set of groups that will be skipped. Mostly because they impact large
+    # numbers of service profiles, and would be detrimental to performance.
+    stoppers = {"UCS Domains", "UCS Chassis", "UCS Fabric Interconnects"}
+    visited, stack = set(), [start]
+    while stack:
+        node = stack.pop()
+        if node.id not in visited:
+            visited.add(node.id)
+            if node.group == "UCS Service Profiles":
+                yield node
+            elif node.group in stoppers:
+                continue
+            else:
+                stack.extend(
+                    x.target for x in node.relations(type=TAG_IMPACTS)
+                    if TAG_IMPACTS in x.tags
+                    and x.target.group.startswith("UCS")
+                    and x.target.id not in visited)
+
+
+if component:
+    # Add "serviceprofile" field to the event if the component affected by
+    # this fault impacts any service profiles.
+    serviceprofile_name = impacted_serviceprofile(component)
+    if serviceprofile_name:
+        evt.serviceprofile = serviceprofile_name
